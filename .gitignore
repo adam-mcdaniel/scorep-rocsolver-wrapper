@@ -1,0 +1,10 @@
+*.la
+*.lo
+*.cc
+scorep*
+.libs
+*.h
+*.i
+rocsolver.*
+main*
+Makefile
