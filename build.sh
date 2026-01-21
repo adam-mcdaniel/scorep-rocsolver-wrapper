@@ -15,8 +15,70 @@ printf "#ifndef LIBWRAP_H\n#define LIBWRAP_H\n#include <rocsolver/rocsolver.h>\n
 
 cat <<EOF > rocsolver.filter
 SCOREP_REGION_NAMES_BEGIN
+  # 1. Block everything by default
   EXCLUDE *
-  INCLUDE rocsolver_*
+
+  # -----------------------------------------------------------
+  # 2. INCLUDE COMPUTE (Factorizations)
+  # These are heavy kernels (LU, Cholesky, QR). Safe to sync.
+  # -----------------------------------------------------------
+  INCLUDE rocsolver_*getrf*
+  INCLUDE rocsolver_*potrf*
+  INCLUDE rocsolver_*geqrf*
+  INCLUDE rocsolver_*sytrf*
+  INCLUDE rocsolver_*hetrf*
+  
+  # -----------------------------------------------------------
+  # 3. INCLUDE COMPUTE (Solvers & Inversions)
+  # -----------------------------------------------------------
+  INCLUDE rocsolver_*getrs*
+  INCLUDE rocsolver_*potrs*
+  INCLUDE rocsolver_*getri*
+  INCLUDE rocsolver_*potri*
+  INCLUDE rocsolver_*trtri*
+  INCLUDE rocsolver_*gesv*
+  INCLUDE rocsolver_*posv*
+
+  # -----------------------------------------------------------
+  # 4. INCLUDE COMPUTE (Eigensolvers & SVD)
+  # These are extremely expensive operations. 
+  # Excellent candidates for profiling.
+  # -----------------------------------------------------------
+  INCLUDE rocsolver_*syev*
+  INCLUDE rocsolver_*heev*
+  INCLUDE rocsolver_*sygv*
+  INCLUDE rocsolver_*hegv*
+  INCLUDE rocsolver_*gesvd*
+  INCLUDE rocsolver_*gebrd*
+
+  # -----------------------------------------------------------
+  # 5. INCLUDE AUXILIARY (Use with Caution)
+  # Helper math often used inside other routines (scaling, swapping).
+  # These can be very fast. Uncomment only if debugging internal latencies.
+  # -----------------------------------------------------------
+  # INCLUDE rocsolver_*laswp*
+  # INCLUDE rocsolver_*lacpy*
+  # INCLUDE rocsolver_*larfg*
+  # INCLUDE rocsolver_*geblt*
+
+  # -----------------------------------------------------------
+  # 6. EXCLUDE FALSE POSITIVES (The "Last Match Wins" Fixes)
+  # -----------------------------------------------------------
+  
+  # CRITICAL: Exclude buffer size queries. 
+  # Since 'rocsolver_dgetrf_bufferSize' matches the '*getrf*' include above,
+  # we must explicitly exclude it here at the end.
+  EXCLUDE rocsolver_*buffer_size*
+  EXCLUDE rocsolver_*bufferSize*
+
+  # Standard housekeeping
+  EXCLUDE rocsolver_*create*
+  EXCLUDE rocsolver_*destroy*
+  EXCLUDE rocsolver_*set*
+  EXCLUDE rocsolver_*get*
+  EXCLUDE rocsolver_*version*
+  EXCLUDE rocsolver_*info*
+
 SCOREP_REGION_NAMES_END
 EOF
 
@@ -129,7 +191,7 @@ if [ ! -f scorep_libwrap_rocsolver.cc ]; then
     echo "Error: scorep_libwrap_rocsolver.cc"
     exit 1
 fi
-# perl -i -pe 's|.*SCOREP_Libwrap_Plugins.h.*|$&\n\n#include <hip/hip_runtime.h>\n#ifdef SCOREP_LIBWRAP_EXIT_WRAPPED_REGION\n#undef SCOREP_LIBWRAP_EXIT_WRAPPED_REGION\n#endif\n#define SCOREP_LIBWRAP_EXIT_WRAPPED_REGION() do { hipDeviceSynchronize(); SCOREP_LIBWRAP_API( exit_wrapped_region )( scorep_libwrap_var_previous ); } while ( 0 )\n|' scorep_libwrap_rocsolver.cc
+perl -i -pe 's|.*SCOREP_Libwrap_Plugins.h.*|$&\n\n#include <hip/hip_runtime.h>\n#ifdef SCOREP_LIBWRAP_EXIT_WRAPPED_REGION\n#undef SCOREP_LIBWRAP_EXIT_WRAPPED_REGION\n#endif\n#define SCOREP_LIBWRAP_EXIT_WRAPPED_REGION() do { hipDeviceSynchronize(); SCOREP_LIBWRAP_API( exit_wrapped_region )( scorep_libwrap_var_previous ); } while ( 0 )\n|' scorep_libwrap_rocsolver.cc
 make
 make check           # execute tests
 make install         # install wrapper
